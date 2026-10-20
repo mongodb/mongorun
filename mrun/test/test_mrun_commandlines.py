@@ -398,3 +398,73 @@ class TestMRun(object):
         """
         self.run_tool('init --replicaset --hostname this_host')
         self.read_config()
+
+    def check_requires_restart_for_auth(self, first_init=True,
+                                        unknown_args=None, **overrides):
+        """Evaluate the auth restart decision with test arguments."""
+        args = {
+            'sharded': ['2'],
+            'auth': True,
+            'initial-user': True,
+            'auth_db': 'admin',
+            'auth_role_docs': False,
+            'auth_roles': ['dbAdminAnyDatabase', 'readWriteAnyDatabase',
+                           'userAdminAnyDatabase', 'clusterAdmin'],
+        }
+        args.update(overrides)
+        self.tool.args = args
+        self.tool.unknown_args = unknown_args or []
+        return self.tool._requires_restart_for_auth(first_init)
+
+    def test_sharded_auth_setup_does_not_require_restart(self):
+        """Sharded auth setup should not restart for the default setup."""
+        assert not self.check_requires_restart_for_auth()
+
+    def test_sharded_auth_setup_requires_first_init(self):
+        """The restart is only required on first init."""
+        assert not self.check_requires_restart_for_auth(first_init=False)
+
+    def test_non_sharded_auth_setup_does_not_require_restart(self):
+        """Non-sharded auth setup never needs this restart."""
+        assert not self.check_requires_restart_for_auth(sharded=False)
+
+    def test_sharded_auth_setup_requires_initial_user(self):
+        """Sharded auth setup without an initial user needs a restart."""
+        assert self.check_requires_restart_for_auth(
+            **{'initial-user': False})
+
+    def test_sharded_auth_setup_requires_admin_auth_db(self):
+        """The first user must be created in the admin database."""
+        assert self.check_requires_restart_for_auth(auth_db='test')
+
+    def test_sharded_auth_setup_requires_cluster_admin(self):
+        """Adding shards requires the clusterAdmin role."""
+        assert self.check_requires_restart_for_auth(
+            auth_roles=['userAdminAnyDatabase'])
+
+    def test_sharded_auth_setup_with_role_docs(self):
+        """clusterAdmin role docs must be scoped to the admin database."""
+        self.tool.args = {
+            'sharded': ['2'],
+            'auth': True,
+            'initial-user': True,
+            'auth_db': 'admin',
+            'auth_role_docs': True,
+            'auth_roles': ['{"role": "clusterAdmin", "db": "admin"}'],
+        }
+        self.tool.unknown_args = []
+        assert not self.tool._requires_restart_for_auth(True)
+
+        self.tool.args['auth_roles'] = [
+            '{"role": "clusterAdmin", "db": "test"}']
+        assert self.tool._requires_restart_for_auth(True)
+
+    def test_sharded_auth_setup_with_localhost_bypass_disabled(self):
+        """Disabling localhost auth bypass requires the restart fallback."""
+        assert self.check_requires_restart_for_auth(
+            unknown_args=['--setParameter', 'enableLocalhostAuthBypass=0'])
+
+    def test_sharded_auth_setup_with_other_set_parameter(self):
+        """Other setParameter arguments do not force the restart fallback."""
+        assert not self.check_requires_restart_for_auth(
+            unknown_args=['--setParameter', 'enableTestCommands=1'])

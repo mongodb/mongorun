@@ -275,7 +275,7 @@ Authentication Parameters
 
    A username and password will also be set up, either on the mongos for
    sharded environments, or on the primary node for replica sets or on a single
-   node.
+   node. The initial user is created through MongoDB's localhost exception.
 
 ``--username``
    This parameter changes the default username ``user`` to the specified user.
