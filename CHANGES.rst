@@ -10,6 +10,8 @@ Unreleased
  * allow psutil 6.x and 7.x
  * mrun: add ``--mongod-arg`` and ``--mongos-arg`` for quoted argument bundles
    passed exclusively to the selected binary
+ * mrun: create the initial user through the localhost exception and avoid
+   restarting authenticated sharded clusters during init
 
 version 1.8.0 - first release of mongorun standalone
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
