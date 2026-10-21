@@ -889,7 +889,7 @@ class MRunTool(BaseCmdLineTool):
                               "because the user does not have the "
                               "clusterAdmin role")
 
-            if not (self.args['sharded'] and cluster_user_created):
+            if not self.args['sharded'] or not cluster_user_created:
                 self._add_user(sorted(nodes)[0], name=self.args['username'],
                                password=self.args['password'],
                                database=self.args['auth_db'],
