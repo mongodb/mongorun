@@ -749,14 +749,9 @@ class MRunTool(BaseCmdLineTool):
             shard_names = self._get_shard_names(self.args)
             override_auth = requires_restart_for_auth
 
-            # start config servers before shard servers, so that shards can
-            # connect to the config server replica set while starting up
+            # start mongod (shard and config) nodes and wait
             nodes = self.get_tagged(['mongod', 'down'])
-            config_nodes = self.get_tagged(['config']).intersection(nodes)
-            shard_nodes = nodes - config_nodes
-            self._start_on_ports(sorted(config_nodes), wait=True,
-                                 override_auth=override_auth)
-            self._start_on_ports(sorted(shard_nodes), wait=True,
+            self._start_on_ports(sorted(nodes), wait=True,
                                  override_auth=override_auth)
 
             # initiate replica sets if init is called for the first time
