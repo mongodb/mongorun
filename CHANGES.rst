@@ -4,6 +4,8 @@ Changes to mongorun
 
 version 1.9.0
 ~~~~~~~~~~~~~
+ * mrun: create the initial user through the localhost exception and avoid
+   restarting authenticated sharded clusters during init
  * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
  * update minimum version of Python to 3.10
 

@@ -117,7 +117,7 @@ def shutdown_host(port, username=None, password=None, authdb=None):
                                  directConnection=True)
         else:
             mc = MongoConnection(host, directConnection=True)
-        
+
         try:
             mc.admin.command('shutdown', force=True)
         except AutoReconnect:
@@ -294,10 +294,10 @@ class MRunTool(BaseCmdLineTool):
                                  type=int, metavar='NUM',
                                  help=('adds NUM config servers to sharded '
                                        'setup (requires --sharded, default=1)'))
-        
+
         init_parser.add_argument('--embeddedcsrs', default=False, action='store_true',
                                  help=('use embedded CSRS (only for MongoDB 8.0.0+), default=False'))
-        
+
         # As of MongoDB 3.6, all config servers must be CSRS
         init_parser.add_argument('--csrs', default=True, action='store_true',
                                  help=argparse.SUPPRESS)
@@ -741,13 +741,18 @@ class MRunTool(BaseCmdLineTool):
                        "an additional '--port <startport>'\n")
             raise SystemExit(errmsg)
 
+        requires_restart_for_auth = self._requires_restart_for_auth(first_init)
+        cluster_user_created = False
+
         if self.args['sharded']:
 
             shard_names = self._get_shard_names(self.args)
+            override_auth = requires_restart_for_auth
 
             # start mongod (shard and config) nodes and wait
             nodes = self.get_tagged(['mongod', 'down'])
-            self._start_on_ports(nodes, wait=True, override_auth=True)
+            self._start_on_ports(sorted(nodes), wait=True,
+                                 override_auth=override_auth)
 
             # initiate replica sets if init is called for the first time
             if first_init:
@@ -766,12 +771,22 @@ class MRunTool(BaseCmdLineTool):
 
             # add mongos
             mongos = sorted(self.get_tagged(['mongos', 'down']))
-            self._start_on_ports(mongos, wait=True, override_auth=True)
+            self._start_on_ports(mongos, wait=True, override_auth=override_auth)
 
             if first_init:
                 # add shards
                 mongos = sorted(self.get_tagged(['mongos']))
-                con = self.client('localhost:%i' % mongos[0])
+                if (self.args['auth'] and self.args['initial-user'] and
+                        not requires_restart_for_auth):
+                    roles, _ = self._get_auth_roles()
+                    self._add_user(mongos[0], name=self.args['username'],
+                                   password=self.args['password'],
+                                   database=self.args['auth_db'],
+                                   roles=roles)
+                    cluster_user_created = True
+                    con = self.auth_client('localhost:%i' % mongos[0])
+                else:
+                    con = self.client('localhost:%i' % mongos[0])
 
                 shards_to_add = len(self.shard_connection_str)
                 nshards = con['config']['shards'].count_documents({})
@@ -814,7 +829,13 @@ class MRunTool(BaseCmdLineTool):
 
             if self.args['embeddedcsrs']:
                 print("Configuring embedded config servers")
-                con = self.client('localhost:%i' % mongos[0])
+                mongos = sorted(self.get_tagged(['mongos']))
+                if (first_init and self.args['auth'] and
+                        self.args['initial-user'] and
+                        not requires_restart_for_auth):
+                    con = self.auth_client('localhost:%i' % mongos[0])
+                else:
+                    con = self.client('localhost:%i' % mongos[0])
                 con.admin.command({'transitionFromDedicatedConfigServer': 1})
 
         elif self.args['single']:
@@ -856,27 +877,18 @@ class MRunTool(BaseCmdLineTool):
                 raise RuntimeError("can't connect to server, so adding admin "
                                    "user isn't possible")
 
-            roles = []
-            found_cluster_admin = False
-            if self.args['auth_role_docs']:
-                for role_str in self.args['auth_roles']:
-                    role_doc = json.loads(role_str)
-                    roles.append(role_doc)
-                    if role_doc['role'] == "clusterAdmin":
-                        found_cluster_admin = True
-            else:
-                roles = self.args['auth_roles']
-                found_cluster_admin = "clusterAdmin" in roles
+            roles, found_cluster_admin = self._get_auth_roles()
 
             if not found_cluster_admin:
                 warnings.warn("the stop command will not work with auth "
                               "because the user does not have the "
                               "clusterAdmin role")
 
-            self._add_user(sorted(nodes)[0], name=self.args['username'],
-                           password=self.args['password'],
-                           database=self.args['auth_db'],
-                           roles=roles)
+            if not self.args['sharded'] or not cluster_user_created:
+                self._add_user(sorted(nodes)[0], name=self.args['username'],
+                               password=self.args['password'],
+                               database=self.args['auth_db'],
+                               roles=roles)
 
             if self.args['sharded']:
                 for shard in shard_names:
@@ -906,8 +918,8 @@ class MRunTool(BaseCmdLineTool):
         self.discover()
 
         # for sharded authenticated clusters, restart after first_init
-        # to enable auth
-        if self.args['sharded'] and self.args['auth'] and first_init:
+        # to enable auth if the cluster could not be set up with auth
+        if requires_restart_for_auth:
             if self.args['verbose']:
                 print("restarting cluster to enable auth...")
             self.restart()
@@ -955,6 +967,14 @@ class MRunTool(BaseCmdLineTool):
         kwargs.update(self.ssl_pymongo_options)
         kwargs.update(self.tls_pymongo_options)
         return MongoConnection(host_and_port, **kwargs)
+
+    def auth_client(self, host_and_port, **kwargs):
+        """Create a client, adding credentials when authentication is enabled."""
+        if self.args and self.args.get('auth'):
+            kwargs.update(username=self.args['username'],
+                          password=self.args['password'],
+                          authSource=self.args['auth_db'])
+        return self.client(host_and_port, **kwargs)
 
     def stop(self):
         """
@@ -1238,6 +1258,39 @@ class MRunTool(BaseCmdLineTool):
 
         # start nodes again via start command
         self.start()
+
+    def _get_auth_roles(self):
+        roles = []
+        found_cluster_admin = False
+        if self.args['auth_role_docs']:
+            for role_str in self.args['auth_roles']:
+                role_doc = json.loads(role_str)
+                roles.append(role_doc)
+                if (role_doc['role'] == "clusterAdmin" and
+                        role_doc.get('db', 'admin') == 'admin'):
+                    found_cluster_admin = True
+        else:
+            roles = self.args['auth_roles']
+            found_cluster_admin = "clusterAdmin" in roles
+        return roles, found_cluster_admin
+
+    def _localhost_auth_bypass_disabled(self):
+        params = ' '.join(self.unknown_args)
+        return re.search(r'enableLocalhostAuthBypass\s*[=:]\s*(?:0|false)\b',
+                         params, re.IGNORECASE) is not None
+
+    def _requires_restart_for_auth(self, first_init):
+        if not self.args['sharded']:
+            return False
+        if not (self.args['auth'] and first_init):
+            return False
+        if not self.args['initial-user']:
+            return True
+        if self.args['auth_db'] != 'admin':
+            return True
+        _, found_cluster_admin = self._get_auth_roles()
+        return (not found_cluster_admin or
+                self._localhost_auth_bypass_disabled())
 
     # --- below are api helper methods, can be called after creating an
     # MRunTool() object
@@ -1873,11 +1926,11 @@ class MRunTool(BaseCmdLineTool):
             return rs_status
         except OperationFailure:
             # not initiated yet
-            
+
             if self.args['verbose']:
                 print("initializing replica set '%s' with configuration: %s"
                       % (name, self.config_docs[name]))
-            
+
             initiated = False
             for i in range(maxwait):
                 try:
