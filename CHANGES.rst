@@ -2,6 +2,11 @@
 Changes to mongorun
 ===================
 
+Unreleased
+~~~~~~~~~~
+ * remove the ``ordereddict`` dependency
+ * allow psutil 6.x and 7.x
+
 version 1.9.0
 ~~~~~~~~~~~~~
  * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
