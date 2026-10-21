@@ -789,10 +789,7 @@ class MRunTool(BaseCmdLineTool):
                                    database=self.args['auth_db'],
                                    roles=roles)
                     cluster_user_created = True
-                    con = self.client('localhost:%i' % mongos[0],
-                                      username=self.args['username'],
-                                      password=self.args['password'],
-                                      authSource=self.args['auth_db'])
+                    con = self.auth_client('localhost:%i' % mongos[0])
                 else:
                     con = self.client('localhost:%i' % mongos[0])
 
@@ -840,10 +837,7 @@ class MRunTool(BaseCmdLineTool):
                 if (first_init and self.args['auth'] and
                         self.args['initial-user'] and
                         not requires_restart_for_auth):
-                    con = self.client('localhost:%i' % mongos[0],
-                                      username=self.args['username'],
-                                      password=self.args['password'],
-                                      authSource=self.args['auth_db'])
+                    con = self.auth_client('localhost:%i' % mongos[0])
                 else:
                     mongos = sorted(self.get_tagged(['mongos']))
                     con = self.client('localhost:%i' % mongos[0])
@@ -978,6 +972,14 @@ class MRunTool(BaseCmdLineTool):
         kwargs.update(self.ssl_pymongo_options)
         kwargs.update(self.tls_pymongo_options)
         return MongoConnection(host_and_port, **kwargs)
+
+    def auth_client(self, host_and_port, **kwargs):
+        """Create a client, adding credentials when authentication is enabled."""
+        if self.args and self.args.get('auth'):
+            kwargs.update(username=self.args['username'],
+                          password=self.args['password'],
+                          authSource=self.args['auth_db'])
+        return self.client(host_and_port, **kwargs)
 
     def stop(self):
         """

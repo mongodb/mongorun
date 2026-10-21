@@ -45,6 +45,37 @@ class TestMRun(object):
         cmd = [cfg['startup_info'][x] for x in cfg['startup_info'].keys()]
         return cfg, cmd
 
+    def test_auth_client_adds_credentials_when_auth_enabled(self):
+        calls = []
+        self.tool.args = {
+            'auth': True,
+            'username': 'test-user',
+            'password': 'test-password',
+            'auth_db': 'test-auth-db',
+        }
+        self.tool.client = lambda host, **kwargs: calls.append((host, kwargs))
+
+        self.tool.auth_client('localhost:27017', readPreference='primary')
+
+        assert calls == [(
+            'localhost:27017',
+            {
+                'username': 'test-user',
+                'password': 'test-password',
+                'authSource': 'test-auth-db',
+                'readPreference': 'primary',
+            },
+        )]
+
+    def test_auth_client_does_not_add_credentials_when_auth_disabled(self):
+        calls = []
+        self.tool.args = {'auth': False}
+        self.tool.client = lambda host, **kwargs: calls.append((host, kwargs))
+
+        self.tool.auth_client('localhost:27017', directConnection=True)
+
+        assert calls == [('localhost:27017', {'directConnection': True})]
+
     def cmdlist_filter(self, cmdlist):
         """Filter command lines to contain only [mongod|mongos] --parameter."""
         # NOTE: Command "mongo was intentionally written with a leading quote
