@@ -13,11 +13,10 @@ import sys
 import threading
 import time
 import warnings
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from operator import itemgetter
 
 import psutil
-from mrun.util import OrderedDict
 from mrun.util.cmdlinetool import BaseCmdLineTool
 from mrun.util.print_table import print_table
 from mrun.util.version import __version__
