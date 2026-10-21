@@ -834,12 +834,12 @@ class MRunTool(BaseCmdLineTool):
 
             if self.args['embeddedcsrs']:
                 print("Configuring embedded config servers")
+                mongos = sorted(self.get_tagged(['mongos']))
                 if (first_init and self.args['auth'] and
                         self.args['initial-user'] and
                         not requires_restart_for_auth):
                     con = self.auth_client('localhost:%i' % mongos[0])
                 else:
-                    mongos = sorted(self.get_tagged(['mongos']))
                     con = self.client('localhost:%i' % mongos[0])
                 con.admin.command({'transitionFromDedicatedConfigServer': 1})
 
