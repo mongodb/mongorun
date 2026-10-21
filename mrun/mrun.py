@@ -117,7 +117,7 @@ def shutdown_host(port, username=None, password=None, authdb=None):
                                  directConnection=True)
         else:
             mc = MongoConnection(host, directConnection=True)
-        
+
         try:
             mc.admin.command('shutdown', force=True)
         except AutoReconnect:
@@ -294,10 +294,10 @@ class MRunTool(BaseCmdLineTool):
                                  type=int, metavar='NUM',
                                  help=('adds NUM config servers to sharded '
                                        'setup (requires --sharded, default=1)'))
-        
+
         init_parser.add_argument('--embeddedcsrs', default=False, action='store_true',
                                  help=('use embedded CSRS (only for MongoDB 8.0.0+), default=False'))
-        
+
         # As of MongoDB 3.6, all config servers must be CSRS
         init_parser.add_argument('--csrs', default=True, action='store_true',
                                  help=argparse.SUPPRESS)
@@ -1931,11 +1931,11 @@ class MRunTool(BaseCmdLineTool):
             return rs_status
         except OperationFailure:
             # not initiated yet
-            
+
             if self.args['verbose']:
                 print("initializing replica set '%s' with configuration: %s"
                       % (name, self.config_docs[name]))
-            
+
             initiated = False
             for i in range(maxwait):
                 try:
