@@ -22,6 +22,9 @@ from mrun.util.cmdlinetool import BaseCmdLineTool
 from mrun.util.print_table import print_table
 from mrun.util.version import __version__
 
+if os.name == 'nt':
+    import mslex
+
 try:
     import Queue
 except ImportError:
@@ -1735,7 +1738,7 @@ class MRunTool(BaseCmdLineTool):
 
         # return valid arguments as joined string
         if os.name == 'nt':
-            return subprocess.list2cmdline(result)
+            return mslex.join(result)
         return shlex.join(result)
 
     def _get_ssl_server_args(self):
@@ -1887,23 +1890,26 @@ class MRunTool(BaseCmdLineTool):
 
     def _without_keyfile(self, command_str):
         """Remove keyfile options and their values from a startup command."""
-        lexer = shlex.shlex(command_str, posix=True)
-        lexer.whitespace_split = True
-        lexer.commenters = ''
+        quoting = mslex if os.name == 'nt' else shlex
         if os.name == 'nt':
-            # Backslashes in Windows paths are not shell escapes.
-            lexer.escape = ''
-
-        arguments = iter(lexer)
+            # MongoDB uses a modern Windows C runtime. mslex also handles the
+            # cmd.exe caret escapes used to protect shell metacharacters.
+            arguments = iter(quoting.split(command_str, ucrt=True))
+        else:
+            arguments = iter(quoting.split(command_str))
         result = []
+        removed = False
         for arg in arguments:
             if arg == '--keyFile':
                 next(arguments, None)
-            elif not arg.startswith('--keyFile='):
+                removed = True
+            elif arg.startswith('--keyFile='):
+                removed = True
+            else:
                 result.append(arg)
-        if os.name == 'nt':
-            return subprocess.list2cmdline(result)
-        return shlex.join(result)
+        if os.name == 'nt' and not removed:
+            return command_str
+        return quoting.join(result)
 
     def _start_on_ports(self, ports, wait=False, override_auth=False):
         if override_auth and self.args['verbose']:

@@ -1,7 +1,11 @@
 import json
 import os
 import shlex
+import subprocess
+import sys
+import time
 
+import mslex
 import pytest
 
 from mrun.mrun import MRunTool
@@ -10,6 +14,8 @@ from mrun.mrun import MRunTool
 @pytest.fixture
 def tool(monkeypatch, tmp_path):
     """Build command lines without launching or contacting MongoDB."""
+    # Windows parsing tests also run on POSIX, where mslex is not imported.
+    monkeypatch.setattr('mrun.mrun.mslex', mslex, raising=False)
     monkeypatch.setattr(MRunTool, 'getMongoDVersion', lambda *args: '8.0.0')
     monkeypatch.setattr('mrun.mrun.check_mongo_server_output',
                         lambda *args: b'  --setParameter arg\n  --port arg\n'
@@ -288,6 +294,120 @@ def test_bootstrap_preserves_windows_paths(tool, monkeypatch):
         result = tool._without_keyfile(command)
     assert result == (r'start /b "" "C:\Program Files\MongoDB\mongod.exe" '
                       r'--dbpath "C:\data path\db" --fork')
+
+
+@pytest.mark.parametrize('inline', [False, True])
+@pytest.mark.parametrize('path', [r'C:\R&D\key', r'C:\R&D\key path',
+                                  'C:\\R&D\\'])
+def test_windows_filter_quotes_shell_metacharacters(tool, monkeypatch, inline, path):
+    option = ['--keyFile=' + path] if inline else ['--keyFile', path]
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._filter_valid_arguments(option)
+    assert mslex.split(result, ucrt=True) == option
+
+
+@pytest.mark.parametrize('inline', [False, True])
+@pytest.mark.parametrize('key_option', [[], ['--keyFile', r'C:\R&D\key'],
+                                      ['--keyFile=C:\\R&D\\key'],
+                                      ['--keyFile', 'C:\\key path\\'],
+                                      ['--keyFile', 'first', '--keyFile=second']])
+def test_windows_bootstrap_preserves_serialized_json(tool, monkeypatch, inline, key_option):
+    value = 'logComponentVerbosity={"command": {"verbosity": 2}}'
+    option = ['--setParameter=' + value] if inline else ['--setParameter', value]
+    prefix = r'start /b "" "C:\Program Files\MongoDB\mongod.exe"  '
+    parameter = subprocess.list2cmdline(option)
+    command = prefix + parameter + ' ' + mslex.join(key_option) + ' --quiet'
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._without_keyfile(command)
+    assert mslex.split(result, ucrt=True) == [
+        'start', '/b', '', r'C:\Program Files\MongoDB\mongod.exe', *option, '--quiet']
+    if not key_option:
+        assert result == command
+
+
+def test_windows_bootstrap_does_not_remove_keyfile_text_in_values(tool, monkeypatch):
+    arguments = ['--setParameter', 'message={"text": "keep --keyFile=/other"}',
+                 '--keyFile', r'C:\key path\key', '--quiet']
+    command = subprocess.list2cmdline(arguments)
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._without_keyfile(command)
+    assert mslex.split(result, ucrt=True) == arguments[:2] + ['--quiet']
+
+
+def test_windows_bootstrap_preserves_shell_escaped_values(tool, monkeypatch):
+    arguments = ['start', '/b', '', r'C:\Program Files\MongoDB\mongod.exe',
+                 '--logpath', r'C:\R&D\log', '--setParameter',
+                 'message={"text": "R&D %PATH% !PATH!"}',
+                 '--keyFile', r'C:\R&D\key', '--keyFile=C:\\other key\\', '--quiet']
+    command = mslex.join(arguments)
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._without_keyfile(command)
+    assert mslex.split(result, ucrt=True) == arguments[:8] + ['--quiet']
+
+
+@pytest.mark.parametrize('auth', [False, True])
+def test_windows_bootstrap_launch_preserves_arguments(tool, monkeypatch, auth):
+    tool.args = {'verbose': False}
+    value = 'logComponentVerbosity={"command": {"verbosity": 2}}'
+    options = ['--setParameter', value]
+    if auth:
+        options += ['--keyFile', r'C:\R&D\key']
+    prefix = r'start /b "" "C:\Program Files\MongoDB\mongod.exe" '
+    tool.startup_info = {'27017': prefix + mslex.join(options)}
+    original = tool.startup_info.copy()
+    launched = []
+    monkeypatch.setattr('mrun.mrun.subprocess.check_call',
+                        lambda command, **kwargs: launched.append((command, kwargs)))
+    monkeypatch.setattr('mrun.mrun.time.sleep', lambda seconds: None)
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        tool._start_on_ports([27017], override_auth=True)
+    command, kwargs = launched[0]
+    assert kwargs == {'shell': True}
+    assert mslex.split(command, ucrt=True) == [
+        'start', '/b', '', r'C:\Program Files\MongoDB\mongod.exe', *options[:2]]
+    assert tool.startup_info == original
+
+
+@pytest.mark.parametrize('metacharacter', list('&|<>^()%!'))
+def test_windows_json_shell_metacharacters_are_escaped(tool, monkeypatch, metacharacter):
+    argument = 'message={"text":"R%sD"}' % metacharacter
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._filter_valid_arguments(['--setParameter', argument])
+    assert mslex.split(result, ucrt=True) == ['--setParameter', argument]
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Requires cmd.exe and Windows argument parsing')
+@pytest.mark.parametrize('bootstrap', [False, True])
+def test_windows_shell_argument_roundtrip(tmp_path, bootstrap):
+    """Check the actual start /b shell and C-runtime parsing, without MongoDB."""
+    output = tmp_path / 'argv.json'
+    arguments = ['--keyFile', r'C:\R&D\key', '--keyFile=C:\\R&D\\key',
+                 '--setParameter', 'logComponentVerbosity={"command": {"verbosity": 2}}',
+                 'message={"text":"R&D|<>()^"}', 'C:\\R&D\\', '', '%PATH%', '!PATH!']
+    script = ('import json, pathlib, sys; '
+              'pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))')
+    command = 'start /b "" ' + mslex.join(
+        [sys.executable, '-c', script, str(output), *arguments])
+    if bootstrap:
+        command = MRunTool(test=True)._without_keyfile(command)
+        arguments = arguments[3:]
+    subprocess.check_call(command, shell=True)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            received = json.loads(output.read_text())
+            break
+        except (FileNotFoundError, json.JSONDecodeError):
+            time.sleep(0.05)
+    else:
+        pytest.fail('Windows argument capture process did not write its result')
+    assert received == arguments
 
 
 @pytest.mark.parametrize('arguments', [
