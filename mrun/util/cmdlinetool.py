@@ -6,6 +6,7 @@ import argparse
 #import datetime
 import os
 #import re
+import shlex
 import signal
 import sys
 
@@ -54,14 +55,14 @@ class BaseCmdLineTool(object):
         if get_unknowns:
             if arguments:
                 self.args, self.unknown_args = (self.argparser.parse_known_args
-                                                (args=arguments.split()))
+                                                (args=shlex.split(arguments)))
             else:
                 (self.args,
                  self.unknown_args) = self.argparser.parse_known_args()
             self.args = vars(self.args)
         else:
             if arguments:
-                myargs = arguments.split()
+                myargs = shlex.split(arguments)
                 self.args = vars(self.argparser.parse_args
                                  (args=myargs))
             else:

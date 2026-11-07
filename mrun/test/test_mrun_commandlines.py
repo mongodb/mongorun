@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+import shlex
 import shutil
 import sys
 from packaging import version
@@ -174,6 +175,30 @@ class TestMRun(object):
             for c in cmdlist:
                 c.add('--fork')
         self.cmdlist_assert(cmdlist)
+
+    @pytest.mark.parametrize('separator', [' ', '='])
+    def test_sharded_shutdown_parameters(self, separator):
+        """Each generated command gets only its supported shutdown timeout."""
+        self.run_tool(
+            'init --sharded 1 --replicaset --nodes 1 --config 1 '
+            '--setParameter{0}enableTestCommands=1 '
+            '--mongod-arg="--setParameter{0}shutdownTimeoutMillisForSignaledShutdown=1000" '
+            '--mongos-arg="--setParameter{0}mongosShutdownTimeoutMillisForSignaledShutdown=2000" '
+            '--setParameter{0}logLevel=2'.format(separator))
+        cfg, commands = self.read_config()
+
+        assert len(commands) == 3
+        for command in commands:
+            assert 'enableTestCommands=1' in command
+            assert 'logLevel=2' in command
+            binary = shlex.split(command)[0]
+            if binary == 'mongod':
+                assert 'shutdownTimeoutMillisForSignaledShutdown=1000' in command
+                assert 'mongosShutdownTimeoutMillisForSignaledShutdown' not in command
+            else:
+                assert binary == 'mongos'
+                assert 'mongosShutdownTimeoutMillisForSignaledShutdown=2000' in command
+                assert 'shutdownTimeoutMillisForSignaledShutdown' not in command
 
     def test_sharded_replicaset_csrs_2(self):
         """

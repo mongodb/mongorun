@@ -6,6 +6,8 @@ Unreleased
 ~~~~~~~~~~
  * remove the ``ordereddict`` dependency
  * allow psutil 6.x and 7.x
+ * mrun: add ``--mongod-arg`` and ``--mongos-arg`` for quoted argument bundles
+   passed exclusively to the selected binary
 
 version 1.9.0
 ~~~~~~~~~~~~~
