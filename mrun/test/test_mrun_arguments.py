@@ -204,7 +204,11 @@ def test_scoped_authentication_options(tool, inline):
     for command in commands(tool):
         assert sum(arg.split('=', 1)[0] == '--keyFile' for arg in command) == 1
         assert key_option[-1] in command
-    assert tool._localhost_auth_bypass_disabled()
+        parameter = 'enableLocalhostAuthBypass=0'
+        if command[0] == 'mongos':
+            assert command[command.index(parameter) - 1] == '--setParameter'
+        else:
+            assert parameter not in command
 
 
 @pytest.mark.parametrize('binary', ['mongod', 'mongos'])
