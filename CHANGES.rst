@@ -4,15 +4,12 @@ Changes to mongorun
 
 Unreleased
 ~~~~~~~~~~
+ * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
+ * update minimum version of Python to 3.10
  * remove the ``ordereddict`` dependency
  * allow psutil 6.x and 7.x
  * mrun: add ``--mongod-arg`` and ``--mongos-arg`` for quoted argument bundles
    passed exclusively to the selected binary
-
-version 1.9.0
-~~~~~~~~~~~~~
- * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
- * update minimum version of Python to 3.10
 
 version 1.8.0 - first release of mongorun standalone
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
