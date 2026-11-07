@@ -1885,6 +1885,26 @@ class MRunTool(BaseCmdLineTool):
             pass
         return loglines
 
+    def _without_keyfile(self, command_str):
+        """Remove keyfile options and their values from a startup command."""
+        lexer = shlex.shlex(command_str, posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        if os.name == 'nt':
+            # Backslashes in Windows paths are not shell escapes.
+            lexer.escape = ''
+
+        arguments = iter(lexer)
+        result = []
+        for arg in arguments:
+            if arg == '--keyFile':
+                next(arguments, None)
+            elif not arg.startswith('--keyFile='):
+                result.append(arg)
+        if os.name == 'nt':
+            return subprocess.list2cmdline(result)
+        return shlex.join(result)
+
     def _start_on_ports(self, ports, wait=False, override_auth=False):
         if override_auth and self.args['verbose']:
             print("creating cluster without auth for setup, "
@@ -1896,7 +1916,7 @@ class MRunTool(BaseCmdLineTool):
             if override_auth:
                 # this is to set up sharded clusters without auth first,
                 # then relaunch with auth
-                command_str = re.sub(r'--keyFile \S+', '', command_str)
+                command_str = self._without_keyfile(command_str)
 
             try:
                 if os.name == 'nt':

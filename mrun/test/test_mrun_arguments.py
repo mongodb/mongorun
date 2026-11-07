@@ -228,6 +228,68 @@ def test_shared_and_matching_scoped_keyfile(tool, binary):
     assert tool._get_key_file_from_args() == '/custom/key'
 
 
+@pytest.mark.parametrize('key_option', [
+    ['--keyFile=/custom/key'],
+    ['--keyFile=/custom/key file'],
+    ['--keyFile', '/custom/key file'],
+])
+def test_bootstrap_removes_scoped_keyfiles(tool, monkeypatch, key_option):
+    init(tool, '--auth', '--mongod-arg', shlex.join(key_option + ['--logappend']),
+         '--mongos-arg', shlex.join(key_option + ['--quiet']))
+    original = tool.startup_info.copy()
+    launched = []
+    monkeypatch.setattr('mrun.mrun.sys.platform', 'linux')
+    monkeypatch.setattr('mrun.mrun.subprocess.check_output',
+                        lambda command, **kwargs: launched.append(command[0]))
+    waited = []
+    monkeypatch.setattr(tool, 'wait_for', lambda ports: waited.append(ports))
+    ports = list(map(int, tool.startup_info))
+
+    tool._start_on_ports(ports, wait=True, override_auth=True)
+
+    assert len(launched) == 3
+    assert waited == [ports]
+    assert tool.startup_info == original
+    for command, original_command in zip(launched, original.values()):
+        expected = shlex.split(original_command)
+        if key_option[0] == '--keyFile':
+            index = expected.index('--keyFile')
+            del expected[index:index + 2]
+        else:
+            expected.remove(key_option[0])
+        assert shlex.split(command) == expected
+
+
+def test_bootstrap_removes_generated_keyfile(tool, monkeypatch):
+    init(tool, '--auth')
+    launched = []
+    monkeypatch.setattr('mrun.mrun.sys.platform', 'linux')
+    monkeypatch.setattr('mrun.mrun.subprocess.check_output',
+                        lambda command, **kwargs: launched.append(command[0]))
+    tool._start_on_ports(list(map(int, tool.startup_info)), override_auth=True)
+    for command in launched:
+        assert '--keyFile' not in shlex.split(command)
+        assert tool.dir + '/keyfile' not in shlex.split(command)
+
+
+def test_bootstrap_removes_all_keyfiles_and_preserves_other_arguments(tool):
+    arguments = ['/path to/mongod', '--setParameter',
+                 "message=don't remove --keyFile=/other",
+                 '--keyFile', '/custom/key file', '--keyFile=/custom/key', '--fork']
+    result = tool._without_keyfile(shlex.join(arguments))
+    assert shlex.split(result) == arguments[:3] + ['--fork']
+
+
+def test_bootstrap_preserves_windows_paths(tool, monkeypatch):
+    command = (r'start /b "" "C:\Program Files\MongoDB\mongod.exe" '
+               r'--dbpath "C:\data path\db" --keyFile "C:\key path\key" --fork')
+    with monkeypatch.context() as patch:
+        patch.setattr('mrun.mrun.os.name', 'nt')
+        result = tool._without_keyfile(command)
+    assert result == (r'start /b "" "C:\Program Files\MongoDB\mongod.exe" '
+                      r'--dbpath "C:\data path\db" --fork')
+
+
 @pytest.mark.parametrize('arguments', [
     ('--mongod-arg=--keyFile=/first', '--mongos-arg=--keyFile=/second'),
     ('--keyFile=/first', '--mongod-arg=--keyFile=/second'),
