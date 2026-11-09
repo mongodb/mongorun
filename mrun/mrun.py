@@ -62,7 +62,7 @@ class MongoConnection(Connection):
         Connection.__init__(self, *args, **kwargs)
 
 
-def wait_for_host(port, interval=1, timeout=30, to_start=True, queue=None,
+def wait_for_host(port, interval=0.1, timeout=30, to_start=True, queue=None,
                   ssl_pymongo_options=None, tls_pymongo_options=None):
     """
     Ping server and wait for response.
@@ -732,7 +732,7 @@ class MRunTool(BaseCmdLineTool):
 
         # if not all ports are free, complain and suggest alternatives.
         all_ports = self.get_tagged(['all'])
-        ports_avail = self.wait_for(all_ports, 1, 1, to_start=False)
+        ports_avail = self.wait_for(all_ports, 0.1, 1, to_start=False)
 
         if not all(map(itemgetter(1), ports_avail)):
             dir_addon = (' --dir %s' % self.relative_dir
@@ -1483,7 +1483,7 @@ class MRunTool(BaseCmdLineTool):
         return(sorted([tag for tag in self.cluster_tags
                        if port in self.cluster_tags[tag]]))
 
-    def wait_for(self, ports, interval=1.0, timeout=30, to_start=True):
+    def wait_for(self, ports, interval=0.1, timeout=30, to_start=True):
         """
         Spawn threads to ping host using a list of ports.
 
