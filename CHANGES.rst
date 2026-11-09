@@ -13,6 +13,7 @@ version 1.9.0
  * allow psutil 6.x and 7.x
  * mrun: add ``--mongod-arg`` and ``--mongos-arg`` for quoted argument bundles
    passed exclusively to the selected binary
+ * reduce ping polling inteval from 1000ms to 100ms 
 
 version 1.8.0 - first release of mongorun standalone
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
