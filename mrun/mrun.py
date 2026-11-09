@@ -1300,6 +1300,11 @@ class MRunTool(BaseCmdLineTool):
         return re.search(r'enableLocalhostAuthBypass\s*[=:]\s*(?:0|false)\b',
                          params, re.IGNORECASE) is not None
 
+    def _has_config_file_argument(self):
+        return any(arg.split('=', 1)[0] in ('-f', '--config')
+                   for binary in ('mongod', 'mongos')
+                   for arg in self._get_args_for_binary(binary))
+
     def _requires_restart_for_auth(self, first_init):
         if not self.args['sharded']:
             return False
@@ -1310,8 +1315,11 @@ class MRunTool(BaseCmdLineTool):
         if self.args['auth_db'] != 'admin':
             return True
         _, found_cluster_admin = self._get_auth_roles()
+        # A config file may disable localhost auth bypass, so use the fallback
+        # without attempting to interpret the contents of the file.
         return (not found_cluster_admin or
-                self._localhost_auth_bypass_disabled())
+                self._localhost_auth_bypass_disabled() or
+                self._has_config_file_argument())
 
     # --- below are api helper methods, can be called after creating an
     # MRunTool() object
