@@ -15,6 +15,7 @@ import threading
 import time
 import warnings
 from collections import OrderedDict, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from operator import itemgetter
 
 import psutil
@@ -760,26 +761,7 @@ class MRunTool(BaseCmdLineTool):
 
             # initiate replica sets if init is called for the first time
             if first_init:
-                replsets = []
-                if self.args['csrs']:
-                    # Initiate config servers in a replicaset
-                    if self.args['verbose']:
-                        print('Initiating config server replica set.')
-                    members = sorted(self.get_tagged(["config"]))
-                    replsets.append((members[0], "configRepl"))
-                for shard in shard_names:
-                    # initiate replica set on first member
-                    if self.args['verbose']:
-                        print('Initiating shard replica set %s.' % shard)
-                    members = sorted(self.get_tagged([shard]))
-                    replsets.append((members[0], shard))
-
-                # Each set is independent, but all must initialize before mongos starts.
-                with ThreadPoolExecutor(max_workers=min(32, max(1, len(replsets)))) as executor:
-                    futures = [executor.submit(self._initiate_replset, port, name)
-                               for port, name in replsets]
-                    for future in futures:
-                        future.result()
+                self._initiate_sharded_replsets(shard_names)
 
             # add mongos
             mongos = sorted(self.get_tagged(['mongos', 'down']))
@@ -1970,6 +1952,27 @@ class MRunTool(BaseCmdLineTool):
 
         if wait:
             self.wait_for(ports)
+
+    def _initiate_sharded_replsets(self, shard_names):
+        """Initialize the config server and shard replica sets concurrently."""
+        replsets = []
+        if self.args['csrs']:
+            if self.args['verbose']:
+                print('Initiating config server replica set.')
+            members = sorted(self.get_tagged(['config']))
+            replsets.append((members[0], 'configRepl'))
+        for shard in shard_names:
+            if self.args['verbose']:
+                print('Initiating shard replica set %s.' % shard)
+            members = sorted(self.get_tagged([shard]))
+            replsets.append((members[0], shard))
+
+        # Each set is independent, but all must initialize before mongos starts.
+        with ThreadPoolExecutor(max_workers=min(32, max(1, len(replsets)))) as executor:
+            futures = [executor.submit(self._initiate_replset, port, name)
+                       for port, name in replsets]
+            for future in futures:
+                future.result()
 
     def _initiate_replset(self, port, name, maxwait=30):
         """Initiate replica set."""
