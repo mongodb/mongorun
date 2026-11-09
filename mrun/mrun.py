@@ -760,18 +760,26 @@ class MRunTool(BaseCmdLineTool):
 
             # initiate replica sets if init is called for the first time
             if first_init:
+                replsets = []
                 if self.args['csrs']:
                     # Initiate config servers in a replicaset
                     if self.args['verbose']:
                         print('Initiating config server replica set.')
                     members = sorted(self.get_tagged(["config"]))
-                    self._initiate_replset(members[0], "configRepl")
+                    replsets.append((members[0], "configRepl"))
                 for shard in shard_names:
                     # initiate replica set on first member
                     if self.args['verbose']:
                         print('Initiating shard replica set %s.' % shard)
                     members = sorted(self.get_tagged([shard]))
-                    self._initiate_replset(members[0], shard)
+                    replsets.append((members[0], shard))
+
+                # Each set is independent, but all must initialize before mongos starts.
+                with ThreadPoolExecutor(max_workers=min(32, max(1, len(replsets)))) as executor:
+                    futures = [executor.submit(self._initiate_replset, port, name)
+                               for port, name in replsets]
+                    for future in futures:
+                        future.result()
 
             # add mongos
             mongos = sorted(self.get_tagged(['mongos', 'down']))
