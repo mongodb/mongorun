@@ -1924,6 +1924,15 @@ class MRunTool(BaseCmdLineTool):
                 # then relaunch with auth
                 command_str = self._without_keyfile(command_str)
 
+            binary = command_str.split()[0]
+            if '--configsvr' in command_str:
+                binary = 'config server'
+
+            if self.args['verbose']:
+                print("launching: %s" % command_str, flush=True)
+            else:
+                print("launching: %s on port %s" % (binary, port), flush=True)
+
             try:
                 if os.name == 'nt':
                     subprocess.check_call(command_str, shell=True)
@@ -1951,19 +1960,9 @@ class MRunTool(BaseCmdLineTool):
                                   "tried to launch: %s\nlog: %s"
                                   % (e.returncode, command_str, log_path))
 
-            return command_str
-
         port_list = list(ports)
         with ThreadPoolExecutor(max_workers=min(32, max(1, len(port_list)))) as executor:
-            for port, command_str in zip(port_list, executor.map(start_port, port_list)):
-                binary = command_str.split()[0]
-                if '--configsvr' in command_str:
-                    binary = 'config server'
-
-                if self.args['verbose']:
-                    print("launching: %s" % command_str)
-                else:
-                    print("launching: %s on port %s" % (binary, port))
+            list(executor.map(start_port, port_list))
 
         if wait:
             self.wait_for(ports)
