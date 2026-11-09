@@ -5,6 +5,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import signal
 import socket
 import ssl
@@ -20,6 +21,9 @@ import psutil
 from mrun.util.cmdlinetool import BaseCmdLineTool
 from mrun.util.print_table import print_table
 from mrun.util.version import __version__
+
+if os.name == 'nt':
+    import mslex
 
 try:
     import Queue
@@ -116,7 +120,7 @@ def shutdown_host(port, username=None, password=None, authdb=None):
                                  directConnection=True)
         else:
             mc = MongoConnection(host, directConnection=True)
-        
+
         try:
             mc.admin.command('shutdown', force=True)
         except AutoReconnect:
@@ -293,10 +297,10 @@ class MRunTool(BaseCmdLineTool):
                                  type=int, metavar='NUM',
                                  help=('adds NUM config servers to sharded '
                                        'setup (requires --sharded, default=1)'))
-        
+
         init_parser.add_argument('--embeddedcsrs', default=False, action='store_true',
                                  help=('use embedded CSRS (only for MongoDB 8.0.0+), default=False'))
-        
+
         # As of MongoDB 3.6, all config servers must be CSRS
         init_parser.add_argument('--csrs', default=True, action='store_true',
                                  help=argparse.SUPPRESS)
@@ -560,6 +564,15 @@ class MRunTool(BaseCmdLineTool):
                                     help=('search for mongod/s binaries in '
                                           'the specified PATH.'))
 
+        for parser in (init_parser, start_parser, restart_parser):
+            for binary in ('mongod', 'mongos'):
+                parser.add_argument(
+                    '--%s-arg' % binary, action='append', type=shlex.split,
+                    default=None, metavar='ARGS',
+                    help=('passes a shell-quoted bundle of arguments only to %s. '
+                          'May be repeated; for example: --%s-arg '
+                          "'--setParameter logLevel=2'." % (binary, binary)))
+
         # list command
         list_parser = subparsers.add_parser('list',
                                             help=('list MongoDB instances of '
@@ -704,14 +717,11 @@ class MRunTool(BaseCmdLineTool):
             if not os.path.exists(self.dir):
                 os.makedirs(self.dir)
 
-            if '--keyFile' in self.unknown_args:
-                # Check if keyfile is readable
-                keyfile = None
+            keyfile_path = self._get_key_file_from_args()
+            if keyfile_path is not None:
                 try:
-                    keyfile_idx = self.unknown_args.index('--keyFile') + 1
-                    keyfile_path = self.unknown_args[keyfile_idx]
-                    keyfile = self._read_key_file(keyfile_path)
-                except:
+                    self._read_key_file(keyfile_path)
+                except Exception:
                     print(f'\n WARNING: Specified keyFile does not appear readable: {keyfile_path}\n')
             else:
                 keyfile = os.path.join(self.dir, "keyfile")
@@ -991,21 +1001,26 @@ class MRunTool(BaseCmdLineTool):
         # if new unknown_args are present, compare them with loaded ones
         # (here we can be certain of protocol v2+)
         if (self.args['binarypath'] is not None or
+                any(self.args.get('%s_arg' % binary) is not None
+                    for binary in ('mongod', 'mongos')) or
                 (self.unknown_args and
                  set(self.unknown_args) != set(self.loaded_unknown_args))):
 
             # store current args, use self.args from file (self.loaded_args)
             start_args = self.args
-            self.args = self.loaded_args
-
-            self.args['binarypath'] = start_args['binarypath']
+            start_unknown_args = self.unknown_args
+            self.args, self.unknown_args = self._get_start_cmd_args()
             # construct new startup strings with updated unknown args.
             # They are for this start only and will not be persisted in
             # the .mrun_startup file
-            self._construct_cmdlines()
-
-            # reset to original args for this start command
-            self.args = start_args
+            try:
+                self._construct_cmdlines()
+            finally:
+                # reset to original args for this start command
+                self.args = start_args
+                self.unknown_args = start_unknown_args
+        else:
+            self._get_key_file_from_args(self.loaded_args, self.loaded_unknown_args)
 
         matches = self._get_ports_from_args(self.args, 'down')
         if len(matches) == 0:
@@ -1224,6 +1239,11 @@ class MRunTool(BaseCmdLineTool):
         self.discover()
 
     def restart(self):
+
+        # Reject invalid overrides before stopping any running processes.
+        if self._load_parameters() and self.startup_info:
+            args, unknown_args = self._get_start_cmd_args()
+            self._get_key_file_from_args(args, unknown_args)
 
         # get all running processes
         processes = self._get_processes()
@@ -1525,6 +1545,11 @@ class MRunTool(BaseCmdLineTool):
             self.loaded_args['auth'] = self.loaded_args['authentication']
             del self.loaded_args['authentication']
 
+        # In versions <= 1.8.0, mongod_arg and mongos_arg did not exist, so set
+        # missing values to None.
+        for binary in ('mongod', 'mongos'):
+            self.loaded_args.setdefault('%s_arg' % binary, None)
+
         return True
 
     def _store_parameters(self):
@@ -1594,6 +1619,56 @@ class MRunTool(BaseCmdLineTool):
         matches = self.get_tagged(tags)
         return matches
 
+    def _get_args_for_binary(self, binary):
+        """Return shared passthrough arguments followed by arguments for binary.
+
+        Each scoped option supplies a bundle of arguments. Flatten the bundles
+        in their original order and append them to the shared unknown arguments.
+        """
+        binary_scoped_args = (self.args or {}).get('%s_arg' % binary) or []
+        return self.unknown_args + [arg for bundle in binary_scoped_args for arg in bundle]
+
+    def _get_start_cmd_args(self):
+        """Combine saved arguments with temporary start/restart overrides."""
+        args = self.loaded_args.copy()
+        if self.args['binarypath'] is not None:
+            args['binarypath'] = self.args['binarypath']
+        for binary in ('mongod', 'mongos'):
+            name = '%s_arg' % binary
+            if self.args.get(name) is not None:
+                args[name] = self.args[name]
+        return args, self.unknown_args or self.loaded_unknown_args
+
+    def _get_key_file_from_args(self, args=None, unknown_args=None):
+        """Return the keyFile path if both binaries resolve to the same value."""
+        if args is None:
+            args = self.args or {}
+        if unknown_args is None:
+            unknown_args = self.unknown_args
+
+        paths = {}
+        for binary in ('mongod', 'mongos'):
+            binary_scoped_args = args.get('%s_arg' % binary) or []
+            arguments = unknown_args + [arg for bundle in binary_scoped_args for arg in bundle]
+            path = None
+            for i, arg in enumerate(arguments):
+                if arg.startswith('--keyFile='):
+                    path = arg.split('=', 1)[1]
+                elif arg == '--keyFile':
+                    if i + 1 == len(arguments) or arguments[i + 1].startswith('-'):
+                        raise SystemExit('--keyFile requires a path')
+                    path = arguments[i + 1]
+                else:
+                    continue
+                if not path:
+                    raise SystemExit('--keyFile requires a path')
+            paths[binary] = path
+
+        if paths['mongod'] != paths['mongos']:
+            raise SystemExit('mongod and mongos must use the same --keyFile path; '
+                             'specify it in shared arguments or for both binaries')
+        return paths['mongod']
+
     def _filter_valid_arguments(self, arguments, binary="mongod",
                                 config=False):
         """
@@ -1629,8 +1704,10 @@ class MRunTool(BaseCmdLineTool):
 
         # filter valid arguments
         result = []
-        for i, arg in enumerate(arguments):
+        accept_value = False
+        for arg in arguments:
             if arg.startswith('-'):
+                accept_value = False
                 # check if the binary accepts this argument
                 # or special case -vvv for any number of v
                 argname = arg.split('=', 1)[0]
@@ -1641,9 +1718,11 @@ class MRunTool(BaseCmdLineTool):
                     continue
                 elif argname in accepted_arguments or re.match(r'-v+', arg):
                     result.append(arg)
+                    accept_value = '=' not in arg
                 elif (binary.endswith('mongod') and
                         argname in self.UNDOCUMENTED_MONGOD_ARGS):
                     result.append(arg)
+                    accept_value = '=' not in arg
                 elif self.ignored_arguments.get(binary + argname) is None:
                     # warn once for each combination of binary and unknown arg
                     self.ignored_arguments[binary + argname] = True
@@ -1651,14 +1730,16 @@ class MRunTool(BaseCmdLineTool):
                             arg in self.UNSUPPORTED_MONGOS_ARGS):
                         print("warning: ignoring unknown argument %s for %s" %
                               (arg, binary))
-            elif i > 0 and arguments[i - 1] in result:
+            elif accept_value:
                 # if it doesn't start with a '-', it could be the value of
                 # the last argument, e.g. `--slowms 1000`
-                # NB: arguments are always quoted
-                result.append(f'"{arg}"')
+                result.append(arg)
+                accept_value = False
 
         # return valid arguments as joined string
-        return ' '.join(result)
+        if os.name == 'nt':
+            return mslex.join(result)
+        return shlex.join(result)
 
     def _get_ssl_server_args(self):
         s = ''
@@ -1807,6 +1888,29 @@ class MRunTool(BaseCmdLineTool):
             pass
         return loglines
 
+    def _without_keyfile(self, command_str):
+        """Remove keyfile options and their values from a startup command."""
+        quoting = mslex if os.name == 'nt' else shlex
+        if os.name == 'nt':
+            # MongoDB uses a modern Windows C runtime. mslex also handles the
+            # cmd.exe caret escapes used to protect shell metacharacters.
+            arguments = iter(quoting.split(command_str, ucrt=True))
+        else:
+            arguments = iter(quoting.split(command_str))
+        result = []
+        removed = False
+        for arg in arguments:
+            if arg == '--keyFile':
+                next(arguments, None)
+                removed = True
+            elif arg.startswith('--keyFile='):
+                removed = True
+            else:
+                result.append(arg)
+        if os.name == 'nt' and not removed:
+            return command_str
+        return quoting.join(result)
+
     def _start_on_ports(self, ports, wait=False, override_auth=False):
         if override_auth and self.args['verbose']:
             print("creating cluster without auth for setup, "
@@ -1818,7 +1922,7 @@ class MRunTool(BaseCmdLineTool):
             if override_auth:
                 # this is to set up sharded clusters without auth first,
                 # then relaunch with auth
-                command_str = re.sub(r'--keyFile \S+', '', command_str)
+                command_str = self._without_keyfile(command_str)
 
             try:
                 if os.name == 'nt':
@@ -1872,11 +1976,11 @@ class MRunTool(BaseCmdLineTool):
             return rs_status
         except OperationFailure:
             # not initiated yet
-            
+
             if self.args['verbose']:
                 print("initializing replica set '%s' with configuration: %s"
                       % (name, self.config_docs[name]))
-            
+
             initiated = False
             for i in range(maxwait):
                 try:
@@ -1985,6 +2089,7 @@ class MRunTool(BaseCmdLineTool):
         construct_mongod, _mongos, _config will create the actual command line
         strings and store them in self.startup_info.
         """
+        self._get_key_file_from_args()
         if self.args['sharded']:
             # construct startup string for sharded environments
             self._construct_sharded()
@@ -2136,6 +2241,7 @@ class MRunTool(BaseCmdLineTool):
 
     def _construct_mongod(self, dbpath, logpath, port, replset=None, extra=''):
         """Construct command line strings for mongod process."""
+        arguments = self._get_args_for_binary('mongod')
         rs_param = ''
         if replset:
             rs_param = '--replSet %s' % replset
@@ -2143,13 +2249,13 @@ class MRunTool(BaseCmdLineTool):
         auth_param = ''
         if self.args['auth']:
             auth_param = ''
-            if '--keyFile' not in self.unknown_args:
+            if self._get_key_file_from_args() is None:
                 key_path = os.path.abspath(os.path.join(self.dir, 'keyfile'))
                 auth_param = f'{auth_param} --keyFile "{key_path}"'
 
-        if self.unknown_args:
+        if arguments:
             config = '--configsvr' in extra
-            extra = self._filter_valid_arguments(self.unknown_args, "mongod",
+            extra = self._filter_valid_arguments(arguments, "mongod",
                                                  config=config) + ' ' + extra
 
         # set WiredTiger cache size to 1 GB by default
@@ -2200,17 +2306,18 @@ class MRunTool(BaseCmdLineTool):
 
     def _construct_mongos(self, logpath, port, configdb):
         """Construct command line strings for a mongos process."""
+        arguments = self._get_args_for_binary('mongos')
         extra = ''
 
         auth_param = ''
         if self.args['auth']:
             auth_param = ''
-            if '--keyFile' not in self.unknown_args:
+            if self._get_key_file_from_args() is None:
                 key_path = os.path.abspath(os.path.join(self.dir, 'keyfile'))
                 auth_param = f'{auth_param} --keyFile "{key_path}"'
 
-        if self.unknown_args:
-            extra = self._filter_valid_arguments(self.unknown_args,
+        if arguments:
+            extra = self._filter_valid_arguments(arguments,
                                                  "mongos") + extra
 
         extra += ' ' + self._get_ssl_server_args()
