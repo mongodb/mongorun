@@ -2,6 +2,9 @@
 Changes to mongorun
 ===================
 
+v. next
+~~~~~~~
+
 version 1.9.0
 ~~~~~~~~~~~~~
  * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
