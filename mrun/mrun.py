@@ -1916,7 +1916,7 @@ class MRunTool(BaseCmdLineTool):
             print("creating cluster without auth for setup, "
                   "will enable auth at the end...")
 
-        for port in ports:
+        def start_port(port):
             command_str = self.startup_info[str(port)]
 
             if override_auth:
@@ -1934,7 +1934,7 @@ class MRunTool(BaseCmdLineTool):
                     proc = subprocess.Popen(command_str, shell=True,
                                            stdout=subprocess.DEVNULL,
                                            stderr=subprocess.STDOUT,
-                                           preexec_fn=os.setpgrp)
+                                           start_new_session=True)
                     time.sleep(0.5)
                     returncode = proc.poll()
                     if returncode is not None and returncode != 0:
@@ -1943,6 +1943,19 @@ class MRunTool(BaseCmdLineTool):
                     subprocess.check_output([command_str], shell=True,
                                             stderr=subprocess.STDOUT)
 
+            except subprocess.CalledProcessError as e:
+                print(e.output)
+                print(self._get_last_error_log(command_str), file=sys.stderr)
+                log_path = self._get_log_path(command_str)
+                raise SystemExit("can't start process, return code %i. "
+                                  "tried to launch: %s\nlog: %s"
+                                  % (e.returncode, command_str, log_path))
+
+            return command_str
+
+        port_list = list(ports)
+        with ThreadPoolExecutor(max_workers=min(32, max(1, len(port_list)))) as executor:
+            for port, command_str in zip(port_list, executor.map(start_port, port_list)):
                 binary = command_str.split()[0]
                 if '--configsvr' in command_str:
                     binary = 'config server'
@@ -1951,14 +1964,6 @@ class MRunTool(BaseCmdLineTool):
                     print("launching: %s" % command_str)
                 else:
                     print("launching: %s on port %s" % (binary, port))
-
-            except subprocess.CalledProcessError as e:
-                print(e.output)
-                print(self._get_last_error_log(command_str), file=sys.stderr)
-                log_path = self._get_log_path(command_str)
-                raise SystemExit("can't start process, return code %i. "
-                                 "tried to launch: %s\nlog: %s"
-                                 % (e.returncode, command_str, log_path))
 
         if wait:
             self.wait_for(ports)
