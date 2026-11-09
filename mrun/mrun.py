@@ -1294,7 +1294,9 @@ class MRunTool(BaseCmdLineTool):
         return roles, found_cluster_admin
 
     def _localhost_auth_bypass_disabled(self):
-        params = ' '.join(self.unknown_args)
+        arguments = (self._get_args_for_binary('mongod') +
+                     self._get_args_for_binary('mongos'))
+        params = ' '.join(arguments)
         return re.search(r'enableLocalhostAuthBypass\s*[=:]\s*(?:0|false)\b',
                          params, re.IGNORECASE) is not None
 

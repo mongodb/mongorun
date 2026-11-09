@@ -520,7 +520,22 @@ class TestMRun(object):
         assert self.check_requires_restart_for_auth(
             unknown_args=['--setParameter', 'enableLocalhostAuthBypass=0'])
 
+    @pytest.mark.parametrize('binary', ['mongod', 'mongos'])
+    @pytest.mark.parametrize('value', ['0', 'false'])
+    def test_scoped_localhost_bypass_disabled_requires_restart(self, binary,
+                                                               value):
+        """A binary-specific bypass setting requires the restart fallback."""
+        assert self.check_requires_restart_for_auth(
+            **{'%s_arg' % binary: [['--setParameter',
+                                    'enableLocalhostAuthBypass=%s' % value]]})
+
     def test_sharded_auth_setup_with_other_set_parameter(self):
         """Other setParameter arguments do not force the restart fallback."""
         assert not self.check_requires_restart_for_auth(
             unknown_args=['--setParameter', 'enableTestCommands=1'])
+
+    @pytest.mark.parametrize('binary', ['mongod', 'mongos'])
+    def test_scoped_other_set_parameter_does_not_require_restart(self, binary):
+        """Unrelated binary-specific parameters do not trigger a restart."""
+        assert not self.check_requires_restart_for_auth(
+            **{'%s_arg' % binary: [['--setParameter', 'enableTestCommands=1']]})
