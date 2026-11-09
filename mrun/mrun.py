@@ -15,6 +15,7 @@ import threading
 import time
 import warnings
 from collections import OrderedDict, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from operator import itemgetter
 
 import psutil
@@ -1393,10 +1394,13 @@ class MRunTool(BaseCmdLineTool):
 
         # tag all nodes with their port number (as string) and whether
         # they are running
-        for port in range(current_port, current_port + num_nodes):
-            self.cluster_tags[str(port)].append(port)
+        ports = range(current_port, current_port + num_nodes)
+        # Probe concurrently, but update the shared topology in port order.
+        with ThreadPoolExecutor(max_workers=min(32, max(1, num_nodes))) as executor:
+            running_states = list(executor.map(self.is_running, ports))
 
-            running = self.is_running(port)
+        for port, running in zip(ports, running_states):
+            self.cluster_tags[str(port)].append(port)
             self.cluster_running[port] = running
             self.cluster_tags['running' if running else 'down'].append(port)
 
