@@ -2,8 +2,8 @@
 Changes to mongorun
 ===================
 
-Unreleased
-~~~~~~~~~~
+version 1.9.0
+~~~~~~~~~~~~~
  * add support for embedded config servers on MongoDB 8.0+ (thanks @renatoriccio!)
  * update minimum version of Python to 3.10
  * remove the ``ordereddict`` dependency
