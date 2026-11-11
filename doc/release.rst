@@ -25,22 +25,15 @@ GitHub milestones and git tags are named with a prefix ``v``, for example
 Releasing a new version
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-#. Create a release branch, named ``release-x.y.z`` where ``x.y.z`` is the
-   version to be released.
 #. Increase the version in ``./mrun/util/version.py`` from ``x.y.z-dev0`` to
-   ``x.y.z``.
+   ``x.y.z`` in develop.
 #. Make sure tests are passing in Python 3.10+ via
    ``tox -re py310,py311,py312,py313,py314``.
 #. Make sure documentation tests are passing via ``tox -re doc``.
 #. Update README.rst and CHANGES.rst accordingly.
 #. Any other cleanup tasks.
-#. (optional) leave the release branch for a few days to give others a chance
-   to test it before releasing.
-#. Run ``python3 setup.py sdist bdist_wheel`` to build the dist packages.
-#. Run ``twine upload dist/*`` to publish the new version to PyPI (if you have
-   permissions, otherwise ask someone who does, e.g. @mdb-srapp).
-#. Merge the release branch into ``main``.
-#. Merge the release branch into ``develop``.
-#. Delete the ``release-x.y.z`` branch.
+#. Merge the ``develop`` branch into ``main`` with --ff-only (docs rebuild
+   trigger)
+#. Tag the release commit with the new version (PyPI publish trigger)
 #. Bump the version on the develop branch (in ``./mrun/util/version.py``) to
    ``x.y.(z+1)-dev0``.
