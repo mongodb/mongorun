@@ -90,6 +90,7 @@ testenv
 testenvs
 timestamp
 tox
+unscoped
 username
 util
 versioned
