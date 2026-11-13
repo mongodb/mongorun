@@ -256,7 +256,9 @@ def test_bootstrap_removes_scoped_keyfiles(tool, monkeypatch, key_option):
     assert len(launched) == 3
     assert waited == [ports]
     assert tool.startup_info == original
-    for command, original_command in zip(launched, original.values()):
+    for command in launched:
+        port = shlex.split(command)[shlex.split(command).index('--port') + 1]
+        original_command = original[port]
         expected = shlex.split(original_command)
         if key_option[0] == '--keyFile':
             index = expected.index('--keyFile')
