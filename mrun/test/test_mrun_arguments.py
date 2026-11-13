@@ -20,7 +20,8 @@ def tool(monkeypatch, tmp_path):
     monkeypatch.setattr('mrun.mrun.check_mongo_server_output',
                         lambda *args: b'  --setParameter arg\n  --port arg\n'
                         b'  --logappend\n  --quiet\n  --keyFile arg\n'
-                        b'  --storageEngine arg\n  --logpath arg\n')
+                        b'  --storageEngine arg\n  --logpath arg\n'
+                        b'  -f [ --config ] arg\n')
     tool = MRunTool(test=True)
     tool.dir = str(tmp_path)
     monkeypatch.setattr(tool, 'discover', lambda: None)
@@ -134,6 +135,59 @@ def test_unscoped_parameters_remain_shared(tool):
     for command in commands(tool):
         assert 'shutdownTimeoutMillisForSignaledShutdown=1000' in command
         assert '--setParameter=mongosShutdownTimeoutMillisForSignaledShutdown=2000' in command
+
+
+@pytest.mark.parametrize('scope', ['shared', 'mongod', 'mongos'])
+@pytest.mark.parametrize('option', [
+    ['-f', 'server.conf'], ['-f=server.conf'],
+    ['--config', 'server.conf'], ['--config=server.conf'],
+])
+def test_config_file_requires_auth_restart(tool, scope, option):
+    tool.args = {
+        'sharded': ['1'], 'auth': True, 'initial-user': True,
+        'auth_db': 'admin', 'auth_role_docs': False,
+        'auth_roles': ['clusterAdmin'],
+    }
+    tool.unknown_args = option if scope == 'shared' else []
+    if scope != 'shared':
+        tool.args['%s_arg' % scope] = [option]
+
+    assert tool._requires_restart_for_auth(True)
+    assert not tool._requires_restart_for_auth(False)
+    tool.args['auth'] = False
+    assert not tool._requires_restart_for_auth(True)
+    tool.args['auth'] = True
+    tool.args['sharded'] = False
+    assert not tool._requires_restart_for_auth(True)
+
+
+@pytest.mark.parametrize('option', ['--configsvr', '--configdb', '-foo'])
+def test_unrelated_options_do_not_require_auth_restart(tool, option):
+    tool.args = {
+        'sharded': ['1'], 'auth': True, 'initial-user': True,
+        'auth_db': 'admin', 'auth_role_docs': False,
+        'auth_roles': ['clusterAdmin'], 'config': 1,
+    }
+    tool.unknown_args = [option, 'server.conf']
+    assert not tool._requires_restart_for_auth(True)
+
+
+@pytest.mark.parametrize('scope, option', [
+    ('shared', '-f server.conf'), ('shared', '-f=server.conf'),
+    ('mongod', '-f server.conf'), ('mongos', '-f server.conf'),
+    ('mongod', '-f=server.conf'), ('mongos', '-f=server.conf'),
+    ('mongod', '--config server.conf'), ('mongos', '--config server.conf'),
+    ('mongod', '--config=server.conf'), ('mongos', '--config=server.conf'),
+])
+def test_parsed_config_file_requires_auth_restart(tool, scope, option):
+    arguments = (shlex.split(option) if scope == 'shared' else
+                 ['--%s-arg=%s' % (scope, option)])
+    init(tool, '--auth', *arguments)
+    assert tool._requires_restart_for_auth(True)
+    if option.startswith('-f'):
+        for command in commands(tool):
+            applies = scope == 'shared' or command[0] == scope
+            assert (shlex.split(option)[0] in command) == applies
 
 
 def prepare_start(tool, monkeypatch):
