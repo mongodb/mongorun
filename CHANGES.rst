@@ -6,6 +6,7 @@ v. next
 ~~~~~~~
  * create the initial user through the localhost exception and avoid
    restarting authenticated sharded clusters during init
+ * Parallelize process launch, replset init, discovery port probes
 
 version 1.9.0
 ~~~~~~~~~~~~~
