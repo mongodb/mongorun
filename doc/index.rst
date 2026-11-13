@@ -2,7 +2,7 @@
 mongorun
 ========
 
-|PyPI version| |Build Status| |Python 310| |Python 311| |Python 312| |Python 313| |Python 314|
+|PyPI version| |PyPI Downloads| |Python 310| |Python 311| |Python 312| |Python 313| |Python 314|
 
 ``mrun``, is a utility to quickly set up complex MongoDB test environments
 on a local machine, including replica sets and sharded clusters. It was
@@ -35,8 +35,8 @@ posted in the `Issues
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/mongorun.svg
    :target: https://pypi.python.org/pypi/mongorun/
-.. |Build Status| image:: https://img.shields.io/travis/rueckstiess/mongorun/master.svg
-   :target: https://travis-ci.org/rueckstiess/mongorun
+.. |PyPI Downloads| image:: https://img.shields.io/pypi/dm/mongorun
+   :target: https://pypi.python.org/pypi/mongorun/
 .. |Python 310| image:: https://img.shields.io/badge/Python-3.10-brightgreen.svg?style=flat
    :target: http://python.org
 .. |Python 311| image:: https://img.shields.io/badge/Python-3.11-brightgreen.svg?style=flat
