@@ -32,7 +32,9 @@ jobs:
       - name: Install MongoDB
         run: |
           mongodbVersion="${{ matrix.mongodb-version }}"
-          keyVersion=${mongodbVersion%%.*}.0
+          majorVersion=${mongodbVersion%%.*}
+          keyVersion=${majorVersion}
+          [[ ${majorVersion} -lt 9 ]] && keyVersion=${majorVersion}.0
           sudo apt-get install -y gnupg curl
           curl -fsSL https://pgp.mongodb.com/server-${keyVersion}.asc | \
               sudo gpg -o /usr/share/keyrings/mongodb-server-${keyVersion}.gpg \
